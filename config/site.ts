@@ -1,8 +1,8 @@
 export type SiteConfig = typeof siteConfig;
 
 export const siteConfig = {
-  name: "Next.js + HeroUI",
-  description: "Make beautiful websites regardless of your design experience.",
+  name: "RPA-P-Frontend",
+  description: "KINGBUS RPA-P Platform",
   navItems: [
     {
       label: "플랫폼 시뮬레이션",
