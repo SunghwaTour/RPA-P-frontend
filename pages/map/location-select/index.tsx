@@ -201,10 +201,9 @@ const LocationSelectInner = () => {
           </Card>
         )}
 
-        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={markerSrc}
           alt="center-marker"
+          src={markerSrc}
           style={{
             width: 40,
             height: "auto",
