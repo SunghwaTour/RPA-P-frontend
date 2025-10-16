@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@heroui/button";
 import { Card, CardHeader, CardBody } from "@heroui/card";
 import { Select, SelectItem } from "@heroui/select";
@@ -34,6 +34,24 @@ interface ApiResponse {
   responseTime: string;
 }
 
+interface Spot {
+  id: number;
+  name: string;
+  x: number;
+  y: number;
+  rotation: number;
+}
+
+interface SpotApiResponse {
+  data: {
+    gateType: string;
+    spots: Spot[];
+  };
+  status: number;
+  message: string;
+  responseTime: string;
+}
+
 const API_BASE_URL = "/api";
 
 export default function PlatformAdminPage() {
@@ -47,6 +65,8 @@ export default function PlatformAdminPage() {
   const [updatingRouteIds, setUpdatingRouteIds] = useState<Set<number>>(
     new Set()
   );
+  // spotId -> name 매핑
+  const [spotNameById, setSpotNameById] = useState<Record<number, string>>({});
 
   const canSearch = useMemo(
     () => Boolean(gateType && day && time),
@@ -95,6 +115,37 @@ export default function PlatformAdminPage() {
 
   const handleRefresh = () => {
     fetchParkingLayout();
+  };
+
+  // 검색 조건이 모두 채워진 상태에서 값이 바뀌면 자동 재검색
+  useEffect(() => {
+    if (gateType && day && time) {
+      fetchParkingLayout();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gateType, day, time]);
+
+  // 게이트별 스팟 목록 조회 및 매핑 구성
+  const fetchSpots = async (gate: GateType) => {
+    try {
+      const params = new URLSearchParams({ gateType: gate || "FRONTDOOR" });
+      const response = await fetch(
+        `${API_BASE_URL}/parking/spot?${params.toString()}`
+      );
+      if (!response.ok) {
+        throw new Error(`Spot API 오류: ${response.status}`);
+      }
+      const result: SpotApiResponse = await response.json();
+      const map: Record<number, string> = {};
+      for (const s of result.data.spots) {
+        map[s.id] = s.name;
+      }
+      setSpotNameById(map);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error("Spot API Error:", e);
+      setSpotNameById({});
+    }
   };
 
   // 라우트 상태(도착/주차상태) 업데이트 공통 유틸
@@ -224,6 +275,9 @@ export default function PlatformAdminPage() {
                   onSelectionChange={(keys) => {
                     const value = Array.from(keys)[0] as GateType;
                     setGateType(value);
+                    if (value) {
+                      fetchSpots(value);
+                    }
                   }}
                   variant="bordered"
                   labelPlacement="outside"
@@ -358,7 +412,7 @@ export default function PlatformAdminPage() {
                                   </Chip>
                                 </div>
                                 <p className="text-xs text-default-500">
-                                  Spot ID: {route.spotId}
+                                  {spotNameById[route.spotId] ?? "-"}
                                 </p>
                               </div>
 
