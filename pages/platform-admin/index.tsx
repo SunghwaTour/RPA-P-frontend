@@ -325,7 +325,7 @@ export default function PlatformAdminPage() {
                   <SelectItem key="15:15">15:15</SelectItem>
                   <SelectItem key="16:15">16:15</SelectItem>
                   <SelectItem key="17:15">17:15</SelectItem>
-                  <SelectItem key="18:15">18:15</SelectItem>
+                  <SelectItem key="19:15">19:15</SelectItem>
                 </Select>
 
                 <Button
