@@ -43,19 +43,17 @@ export default function PlatformAdminPage() {
   const [data, setData] = useState<ParkingLayoutData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [applying, setApplying] = useState(false);
-
-  // 변경사항 추적
-  const [changes, setChanges] = useState<
-    Map<number, { isArrived: boolean | null; status: RouteStatus }>
-  >(new Map());
+  // 라우트별 업데이트 상태
+  const [updatingRouteIds, setUpdatingRouteIds] = useState<Set<number>>(
+    new Set()
+  );
 
   const canSearch = useMemo(
     () => Boolean(gateType && day && time),
     [gateType, day, time]
   );
 
-  const hasChanges = useMemo(() => changes.size > 0, [changes]);
+  // 변경사항 일괄 적용 제거로 해당 변수는 불필요
 
   const fetchParkingLayout = async () => {
     if (!canSearch) return;
@@ -80,7 +78,6 @@ export default function PlatformAdminPage() {
 
       const result: ApiResponse = await response.json();
       setData(result.data);
-      setChanges(new Map()); // 데이터 새로고침 시 변경사항 초기화
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "데이터를 불러오는데 실패했습니다"
@@ -100,72 +97,101 @@ export default function PlatformAdminPage() {
     fetchParkingLayout();
   };
 
-  // 변경사항 추적
-  const handleRouteChange = (
+  // 라우트 상태(도착/주차상태) 업데이트 공통 유틸
+  const withRouteUpdating = async (
     routeId: number,
-    isArrived: boolean | null,
-    status: RouteStatus
+    action: () => Promise<void>
   ) => {
-    setChanges((prev) => {
-      const newChanges = new Map(prev);
-      newChanges.set(routeId, { isArrived, status });
-      return newChanges;
+    setUpdatingRouteIds((prev) => {
+      const next = new Set(prev);
+      next.add(routeId);
+      return next;
     });
-  };
-
-  // 변경사항 일괄 적용
-  const handleApplyChanges = async () => {
-    if (changes.size === 0) return;
-
-    setApplying(true);
-    const errors: string[] = [];
-
     try {
-      // 모든 변경사항을 순차적으로 처리
-      const changeEntries = Array.from(changes.entries());
-      for (const [routeId, change] of changeEntries) {
-        try {
-          const response = await fetch(`${API_BASE_URL}/parking/arrival`, {
-            method: "PATCH",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              routeId,
-              isArrived: change.isArrived,
-              status: change.status,
-            }),
-          }); 
-
-          if (!response.ok) {
-            throw new Error(`노선 ID ${routeId} 업데이트 실패`);
-          }
-        } catch (err) {
-          errors.push(
-            err instanceof Error ? err.message : `노선 ID ${routeId} 오류`
-          );
-        }
-      }
-
-      if (errors.length > 0) {
-        alert(`일부 업데이트 실패:\n${errors.join("\n")}`);
-      }
-
-      // 성공 후 데이터 새로고침
-      await fetchParkingLayout();
-    } catch (err) {
-      // eslint-disable-next-line no-console
-      console.error("Apply Changes Error:", err);
-      alert("변경사항 적용에 실패했습니다");
+      await action();
     } finally {
-      setApplying(false);
+      setUpdatingRouteIds((prev) => {
+        const next = new Set(prev);
+        next.delete(routeId);
+        return next;
+      });
     }
   };
 
-  // 현재 노선의 값 가져오기 (변경사항이 있으면 변경값, 없으면 원본값)
-  const getRouteValue = (route: Route) => {
-    const change = changes.get(route.id);
-    return change || { isArrived: route.isArrived, status: route.status };
+  const updateArrival = async (route: Route, next: "in" | "out") => {
+    const prevArrived = route.isArrived;
+    // 낙관적 반영
+    setData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        routes: prev.routes.map((r) =>
+          r.id === route.id ? { ...r, isArrived: next === "in" } : r
+        ),
+      };
+    });
+
+    await withRouteUpdating(route.id, async () => {
+      const res = await fetch(`${API_BASE_URL}/parking/arrival`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          routeSpotId: route.id,
+          arrivalStatus: next,
+        }),
+      });
+      if (!res.ok) {
+        // 롤백
+        setData((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            routes: prev.routes.map((r) =>
+              r.id === route.id ? { ...r, isArrived: prevArrived } : r
+            ),
+          };
+        });
+        alert("도착 상태 변경에 실패했습니다.");
+      }
+    });
+  };
+
+  const updateParkingStatus = async (route: Route, next: RouteStatus) => {
+    const prevStatus = route.status;
+    // 낙관적 반영
+    setData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        routes: prev.routes.map((r) =>
+          r.id === route.id ? { ...r, status: next } : r
+        ),
+      };
+    });
+
+    await withRouteUpdating(route.id, async () => {
+      const res = await fetch(`${API_BASE_URL}/parking/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          routeSpotId: route.id,
+          parkingStatus: next,
+        }),
+      });
+      if (!res.ok) {
+        // 롤백
+        setData((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            routes: prev.routes.map((r) =>
+              r.id === route.id ? { ...r, status: prevStatus } : r
+            ),
+          };
+        });
+        alert("상태 변경에 실패했습니다.");
+      }
+    });
   };
 
   return (
@@ -283,15 +309,6 @@ export default function PlatformAdminPage() {
                     >
                       새로고침
                     </Button>
-                    <Button
-                      size="sm"
-                      color="primary"
-                      onPress={handleApplyChanges}
-                      isDisabled={!hasChanges || applying}
-                      isLoading={applying}
-                    >
-                      변경내용 적용
-                    </Button>
                   </div>
                 )}
               </CardHeader>
@@ -312,7 +329,7 @@ export default function PlatformAdminPage() {
                 ) : data && data.routes.length > 0 ? (
                   <div className="space-y-3">
                     {data.routes.map((route) => {
-                      const currentValue = getRouteValue(route);
+                      const isUpdating = updatingRouteIds.has(route.id);
                       return (
                         <Card
                           key={route.id}
@@ -330,12 +347,12 @@ export default function PlatformAdminPage() {
                                     size="sm"
                                     variant="flat"
                                     color={
-                                      currentValue.status === "warning"
+                                      route.status === "warning"
                                         ? "warning"
                                         : "success"
                                     }
                                   >
-                                    {currentValue.status === "warning"
+                                    {route.status === "warning"
                                       ? "주의"
                                       : "정상"}
                                   </Chip>
@@ -350,60 +367,62 @@ export default function PlatformAdminPage() {
                                   size="sm"
                                   label="도착 상태"
                                   selectedKeys={
-                                    new Set([
-                                      currentValue.isArrived === null
-                                        ? "null"
-                                        : currentValue.isArrived
-                                          ? "true"
-                                          : "false",
-                                    ])
+                                    new Set(
+                                      [
+                                        route.isArrived === null
+                                          ? undefined
+                                          : route.isArrived
+                                            ? "in"
+                                            : "out",
+                                      ].filter(Boolean) as string[]
+                                    )
                                   }
                                   onSelectionChange={(keys) => {
+                                    if (isUpdating) return;
                                     const value = Array.from(keys)[0] as string;
-                                    const isArrived =
-                                      value === "null"
-                                        ? null
-                                        : value === "true";
-                                    handleRouteChange(
-                                      route.id,
-                                      isArrived,
-                                      currentValue.status
-                                    );
+                                    const next = value as "in" | "out";
+                                    if (next !== "in" && next !== "out") return;
+                                    updateArrival(route, next);
                                   }}
                                   className="w-36"
                                   classNames={{
                                     trigger: "h-10",
                                   }}
                                   variant="bordered"
+                                  isDisabled={isUpdating}
                                 >
-                                  <SelectItem key="null">알수없음</SelectItem>
-                                  <SelectItem key="true">IN</SelectItem>
-                                  <SelectItem key="false">OUT</SelectItem>
+                                  <SelectItem key="in">IN</SelectItem>
+                                  <SelectItem key="out">OUT</SelectItem>
                                 </Select>
 
                                 <Select
                                   size="sm"
                                   label="상태"
-                                  selectedKeys={new Set([currentValue.status])}
+                                  selectedKeys={new Set([route.status])}
                                   onSelectionChange={(keys) => {
+                                    if (isUpdating) return;
                                     const value = Array.from(
                                       keys
                                     )[0] as RouteStatus;
-                                    handleRouteChange(
-                                      route.id,
-                                      currentValue.isArrived,
-                                      value
-                                    );
+                                    if (
+                                      value !== "normal" &&
+                                      value !== "warning"
+                                    )
+                                      return;
+                                    updateParkingStatus(route, value);
                                   }}
                                   className="w-28"
                                   classNames={{
                                     trigger: "h-10",
                                   }}
                                   variant="bordered"
+                                  isDisabled={isUpdating}
                                 >
                                   <SelectItem key="normal">정상</SelectItem>
                                   <SelectItem key="warning">주의</SelectItem>
                                 </Select>
+
+                                {isUpdating && <Spinner size="sm" />}
                               </div>
                             </div>
                           </CardBody>
