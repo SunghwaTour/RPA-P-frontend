@@ -125,19 +125,17 @@ export default function PlatformAdminPage() {
       const changeEntries = Array.from(changes.entries());
       for (const [routeId, change] of changeEntries) {
         try {
-          const response = await fetch(
-            `${API_BASE_URL}/parking/route/${routeId}`,
-            {
-              method: "PATCH",
-              headers: {
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                isArrived: change.isArrived,
-                status: change.status,
-              }),
-            }
-          );
+          const response = await fetch(`${API_BASE_URL}/parking/arrival`, {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              routeId,
+              isArrived: change.isArrived,
+              status: change.status,
+            }),
+          }); 
 
           if (!response.ok) {
             throw new Error(`노선 ID ${routeId} 업데이트 실패`);
